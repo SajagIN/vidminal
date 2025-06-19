@@ -4,6 +4,12 @@ Ever wanted to watch videos but, like, without all those fancy pixels? Just good
 It's a super "optimized" tool that turns any video into a glorious, eye-straining ASCII art experience right in your terminal. Plus, it plays the audio. Because even a lazy developer knows you can't just have silent movies. 😴
 
 ## 🚀 How to Get This Masterpiece Running
+
+### From Binaries
+Just download the right executable for your OS from the [Releases](https://github.com/sajagin/vidminal/releases) page. No Python or dependencies needed. Run it and follow the prompts. All required files (including BadApple.mp4 and ffmpeg) are bundled.
+
+### From Python Script
+
 - Prerequisites (Stuff You Probably Already Have, Hopefully)
 - **Python**: 'Cause that's what this is written in. Duh.
 - **Pillow**: For image magic. `pip install Pillow`
@@ -11,12 +17,16 @@ It's a super "optimized" tool that turns any video into a glorious, eye-strainin
 - **pygame**: For sound. `pip install pygame`
 
 ### No More FFmpeg Setup!
-You don't need to install ffmpeg yourself anymore. This repo ships with a compressed `ffmpeg_bin.zip` containing all the ffmpeg binaries for Windows, Mac, and Linux (even ARM stuff). The script will extract and use the right one for your system, automatically. So, yeah, just run it.
+You don't need to install ffmpeg yourself anymore. This repo ships with a compressed `ffmpeg_bin.7z` containing all the ffmpeg binaries for Windows, Mac, and Linux (even ARM stuff). The script will extract and use the right one for your system, automatically. So, yeah, just run it.
 
 ## 🍿 Usage: "Watch" a Video
 Just run it. The script will ask you for everything (video file, width, fps, temp folder) like a lazy wizard. ✨
 ```bash
 python vidminal.py
+```
+Or, if you downloaded a binary, just run it:
+```bash
+./vidminal-windows.exe  # or vidminal-linux, vidminal-macos
 ```
 Just follow the prompts. Or just hit Enter for the defaults. That's it.
 
@@ -34,6 +44,7 @@ Just press Enter to accept the defaults, or type your own values. Easy.
 - Performance: It's Python. It's ASCII. It might stutter. Don't come crying to me.
 - Temporary Files: It creates a bunch of image files and an audio file. It doesn't clean them up automatically. Why? **Because I'm lazy. Delete them yourself!** 🔥🗑️
 - ffmpeg will be extracted to the script's root folder if not already there. If you delete it, it'll just get extracted again. Magic.
+- **Full video path is required (No relative path)**
 
 ## Contributing (LOL)
 Sure, if you really wanna make this "better," feel free. But honestly, it works, right? So why bother? Issues and pull requests are technically welcome, I guess. 🙄
