@@ -9,6 +9,7 @@ from moviepy import VideoFileClip
 import contextlib
 import io
 import py7zr
+import queue
 
 # finds stuff, works with PyInstaller too (hopefully)
 def find_resource_path(rel):
@@ -192,6 +193,92 @@ def play_ascii_video_stream(folder, audio, speed=24, wide=80, buffer_size=24):
     key_thread.join()
     pygame.mixer.quit()
 
+# streams video/audio in parallel, starts playback after buffer fills
+def get_stuff_from_video_stream(vid, out, speed=24, buffer_size=24):
+    if not os.path.exists(out):
+        os.makedirs(out)
+    audio = os.path.join(out, 'audio.ogg')
+    print('Doing video things...')
+    clip = VideoFileClip(vid)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        clip.audio.write_audiofile(audio, codec='libvorbis')
+    frame_queue = queue.Queue(maxsize=buffer_size*2)
+    total_frames = int(clip.fps * clip.duration)
+    def extract_frames():
+        for i, frame in enumerate(clip.iter_frames(fps=speed, dtype='uint8')):
+            frame_path = os.path.join(out, f'frame_{i+1:05d}.png')
+            Image.fromarray(frame).save(frame_path)
+            frame_queue.put(frame_path)
+        frame_queue.put(None)  # Sentinel for end
+    threading.Thread(target=extract_frames, daemon=True).start()
+    return out, audio, frame_queue
+
+# plays ascii video + audio from stream, handles pause/quit
+def play_ascii_video_stream_streaming(folder, audio, frame_queue, speed=24, wide=80, buffer_size=24):
+    pygame.mixer.init()
+    delay = 1.0 / speed
+    stop_flag = threading.Event()
+    pause_flag = threading.Event()
+    pause_flag.clear()
+
+    def keyboard_listener():
+        while not stop_flag.is_set():
+            key = getch()
+            if key == ' ':
+                if pause_flag.is_set():
+                    pause_flag.clear()
+                else:
+                    pause_flag.set()
+            if key in ('q', 'Q'):
+                stop_flag.set()
+            time.sleep(0.05)
+
+    key_thread = threading.Thread(target=keyboard_listener, daemon=True)
+    key_thread.start()
+
+    def play_audio_from(pos):
+        pygame.mixer.music.load(audio)
+        pygame.mixer.music.play(start=pos)
+
+    print('\x1b[2J', end='')  # clear screen
+    start = time.time()
+    play_audio_from(0)
+    i = 0
+    frames_buffer = []
+    # Pre-buffer
+    while len(frames_buffer) < buffer_size:
+        frame_path = frame_queue.get()
+        if frame_path is None:
+            break
+        frames_buffer.append(frame_path)
+    while not stop_flag.is_set() and frames_buffer:
+        if pause_flag.is_set():
+            pygame.mixer.music.pause()
+            paused_at = i * delay
+            while pause_flag.is_set() and not stop_flag.is_set():
+                time.sleep(0.1)
+            if stop_flag.is_set():
+                break
+            play_audio_from(paused_at)
+            start = time.time() - paused_at
+        tgt = start + i * delay
+        now = time.time()
+        sleep_for = tgt - now
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+        print('\x1b[H', end='')
+        print(pic_to_ascii(frames_buffer[0], wide), end='')
+        i += 1
+        frames_buffer.pop(0)
+        next_frame = frame_queue.get()
+        if next_frame is None:
+            continue
+        frames_buffer.append(next_frame)
+    stop_flag.set()
+    pygame.mixer.music.stop()
+    key_thread.join()
+    pygame.mixer.quit()
+
 # main thing, asks stuff, runs stuff
 def main():
     extract_and_set_ffmpeg_bin()  # pulls ffmpeg from zip, sets env, whatever
@@ -210,9 +297,9 @@ def main():
         fps = 24
     print('Space = pause, Q = quit')
     try:
-        frames, audio = get_stuff_from_video(vid, temp, speed=fps)
+        frames, audio, frame_queue = get_stuff_from_video_stream(vid, temp, speed=fps, buffer_size=fps)
         print('Streaming ASCII video...')
-        play_ascii_video_stream(frames, audio, speed=fps, wide=width, buffer_size=fps)
+        play_ascii_video_stream_streaming(frames, audio, frame_queue, speed=fps, wide=width, buffer_size=fps)
     except Exception as e:
         print(f'Nope, broke: {e}')
         sys.exit(1)
