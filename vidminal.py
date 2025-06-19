@@ -3,82 +3,107 @@ import sys
 import time
 from PIL import Image
 import threading
-import queue
 import platform
 import pygame
 from moviepy import VideoFileClip
 import contextlib
 import io
+import py7zr
 
-# Helper function to find bundled resources, 'cause PyInstaller hides stuff
-def find_resource_path(relative_path):
+# finds stuff, works with PyInstaller too (hopefully)
+def find_resource_path(rel):
     try:
-        # If running as a PyInstaller bundle, use the _MEIPASS path
-        base_path = sys._MEIPASS
+        base = sys._MEIPASS
     except AttributeError:
-        # Otherwise, we're probably running the .py script directly
-        base_path = os.path.abspath(".")
-    
-    return os.path.join(base_path, relative_path)
+        base = os.path.abspath('.')
+    return os.path.join(base, rel)
 
-def get_stuff_from_video(video_file, where_to_dump, speed=24):
-    # Use moviepy to extract frames and audio (no ffmpeg_bin needed, it was 500mb :sob: )
-    if not os.path.exists(where_to_dump):
-        os.makedirs(where_to_dump)
-    frame_naming = os.path.join(where_to_dump, 'frame_%05d.png')
-    audio_file = os.path.join(where_to_dump, 'audio.ogg')
-    print('Loading and processing video...')
-    clip = VideoFileClip(video_file)
-    # Suppress moviepy and pygame hello messages
+# pulls ffmpeg from zip, dumps in root, sets env, done
+def extract_and_set_ffmpeg_bin():
+    zip_path = find_resource_path('ffmpeg_bin.7z')
+    sysname = platform.system().lower()
+    arch = platform.machine().lower()
+    if sysname == 'windows':
+        ffmpeg_in_zip = 'windows/ffmpeg.exe'
+        out_name = 'ffmpeg.exe'
+    elif sysname == 'darwin':
+        ffmpeg_in_zip = 'mac/ffmpeg'
+        out_name = 'ffmpeg'
+    elif sysname == 'linux':
+        if 'arm' in arch:
+            if '64' in arch:
+                ffmpeg_in_zip = 'linux/linux-arm-64/ffmpeg'
+            else:
+                ffmpeg_in_zip = 'linux/linux-armhf-32/ffmpeg'
+        elif '64' in arch:
+            ffmpeg_in_zip = 'linux/linux-64/ffmpeg'
+        else:
+            ffmpeg_in_zip = 'linux/linux-32/ffmpeg'
+        out_name = 'ffmpeg'
+    else:
+        ffmpeg_in_zip = None
+        out_name = 'ffmpeg'
+    if ffmpeg_in_zip:
+        out_path = os.path.abspath(out_name)
+        if not os.path.exists(out_path):
+            with py7zr.SevenZipFile(zip_path, 'r') as archive:
+                archive.extract(targets=[ffmpeg_in_zip], path='.')
+            if sysname != 'windows':
+                os.chmod(out_path, 0o755)  # make executable, I guess
+        os.environ['FFMPEG_BINARY'] = out_path
+    else:
+        os.environ['FFMPEG_BINARY'] = 'ffmpeg'  # fallback, yolo
+
+# turns video into frames & audio, dumps in folder
+def get_stuff_from_video(vid, out, speed=24):
+    if not os.path.exists(out):
+        os.makedirs(out)
+    audio = os.path.join(out, 'audio.ogg')
+    print('Doing video things...')
+    clip = VideoFileClip(vid)
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        clip.audio.write_audiofile(audio_file, codec='libvorbis')
-    # Write frames
-    for idx, frame in enumerate(clip.iter_frames(fps=speed, dtype='uint8')):
-        img = Image.fromarray(frame)
-        img.save(os.path.join(where_to_dump, f'frame_{idx+1:05d}.png'))
-    print('Video processing complete.')
-    return where_to_dump, audio_file
+        clip.audio.write_audiofile(audio, codec='libvorbis')
+    for i, frame in enumerate(clip.iter_frames(fps=speed, dtype='uint8')):
+        Image.fromarray(frame).save(os.path.join(out, f'frame_{i+1:05d}.png'))
+    print('Done.')
+    return out, audio
 
-def pic_to_ascii(image_path, wide=80):
-    # Turn a pic into text junk. Basic conversion logic.
-    chars_to_use = "@%#*+=-:. "
-    pic = Image.open(image_path).convert('L') # Greyscale, less effort.
-    
+# image to ascii, not rocket science
+def pic_to_ascii(img, wide=80):
+    chars = "@%#*+=-:. "
+    pic = Image.open(img).convert('L')
     ratio = pic.height / pic.width
-    new_tall = int(ratio * wide * 0.55)
-    pic = pic.resize((wide, new_tall)) # Squish it to fit.
-    
-    pixels = pic.getdata()
-    ascii_output = ""
-    for i, pixel_value in enumerate(pixels):
-        ascii_output += chars_to_use[pixel_value * len(chars_to_use) // 256] # Char mapping.
+    tall = int(ratio * wide * 0.55)
+    pic = pic.resize((wide, tall))
+    px = pic.getdata()
+    out = ''
+    for i, p in enumerate(px):
+        out += chars[p * len(chars) // 256]
         if (i + 1) % wide == 0:
-            ascii_output += '\n' # New line.
-            
-    return ascii_output
+            out += '\n'
+    return out
 
-def prepare_ascii_frames_stream(frames_folder, wide=80, buffer_size=24):
-    # Converts frames to ASCII on the fly. Yields one at a time.
-    all_frames = sorted([f for f in os.listdir(frames_folder) if f.startswith('frame_') and f.endswith('.png')])
-    for f in all_frames:
-        frame_path = os.path.join(frames_folder, f)
-        yield pic_to_ascii(frame_path, wide)
+# yields ascii frames, lazy style
+def prepare_ascii_frames_stream(folder, wide=80, buffer_size=24):
+    frames = sorted([f for f in os.listdir(folder) if f.startswith('frame_') and f.endswith('.png')])
+    for f in frames:
+        yield pic_to_ascii(os.path.join(folder, f), wide)
 
-def play_sound(audio_path, pause_flag, stop_flag):
+# plays sound, can pause/stop, whatever
+def play_sound(audio, pause_flag, stop_flag):
     pygame.mixer.init()
-    pygame.mixer.music.load(audio_path)
+    pygame.mixer.music.load(audio)
     pygame.mixer.music.play()
     paused_at = 0
     was_paused = False
     while not stop_flag.is_set():
         if pause_flag.is_set():
             if not was_paused:
-                paused_at = pygame.mixer.music.get_pos() / 1000.0  # seconds
+                paused_at = pygame.mixer.music.get_pos() / 1000.0
                 pygame.mixer.music.pause()
                 was_paused = True
         else:
             if was_paused:
-                # For OGG, we can resume from paused position
                 pygame.mixer.music.play(start=paused_at)
                 was_paused = False
         if not pygame.mixer.music.get_busy() and not pause_flag.is_set():
@@ -87,40 +112,39 @@ def play_sound(audio_path, pause_flag, stop_flag):
     pygame.mixer.music.stop()
     pygame.mixer.quit()
 
+# gets one char from user, non-blocking, magic
 def getch():
-    # Cross-platform single character input (non-blocking)
     if platform.system() == 'Windows':
         import msvcrt
         if msvcrt.kbhit():
             return msvcrt.getch().decode('utf-8', errors='ignore')
-        else:
-            return None
+        return None
     else:
         import sys, select, tty, termios
         fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
+        old = termios.tcgetattr(fd)
         try:
             tty.setcbreak(fd)
-            dr, dw, de = select.select([sys.stdin], [], [], 0)
+            dr, _, _ = select.select([sys.stdin], [], [], 0)
             if dr:
                 return sys.stdin.read(1)
             return None
         finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
+# clears terminal, because why not
 def clear_terminal():
-    # Cross-platform terminal clear
     os.system('cls' if platform.system() == 'Windows' else 'clear')
 
-def play_ascii_video_stream(frames_folder, audio_path, speed=24, wide=80, buffer_size=24):
-    import pygame
+# plays ascii frames + sound, handles pause/quit
+def play_ascii_video_stream(folder, audio, speed=24, wide=80, buffer_size=24):
     pygame.mixer.init()
-    frame_delay = 1.0 / speed
-    all_frames = sorted([f for f in os.listdir(frames_folder) if f.startswith('frame_') and f.endswith('.png')])
-    total_frames = len(all_frames)
+    delay = 1.0 / speed
+    frames = sorted([f for f in os.listdir(folder) if f.startswith('frame_') and f.endswith('.png')])
+    total = len(frames)
     stop_flag = threading.Event()
     pause_flag = threading.Event()
-    pause_flag.clear()  # Not paused at start
+    pause_flag.clear()
 
     def keyboard_listener():
         while not stop_flag.is_set():
@@ -137,64 +161,60 @@ def play_ascii_video_stream(frames_folder, audio_path, speed=24, wide=80, buffer
     key_thread = threading.Thread(target=keyboard_listener, daemon=True)
     key_thread.start()
 
-    def play_audio_from(pos_sec):
-        pygame.mixer.music.load(audio_path)
-        pygame.mixer.music.play(start=pos_sec)
+    def play_audio_from(pos):
+        pygame.mixer.music.load(audio)
+        pygame.mixer.music.play(start=pos)
 
-    idx = 0
-    print('\x1b[2J', end='')  # Clear screen once at the start
-    start_time = time.time()
+    i = 0
+    print('\x1b[2J', end='')  # clear screen, trust me
+    start = time.time()
     play_audio_from(0)
-    while idx < total_frames and not stop_flag.is_set():
+    while i < total and not stop_flag.is_set():
         if pause_flag.is_set():
             pygame.mixer.music.pause()
-            paused_at = idx * frame_delay
+            paused_at = i * delay
             while pause_flag.is_set() and not stop_flag.is_set():
                 time.sleep(0.1)
             if stop_flag.is_set():
                 break
-            # Resume: restart both audio and video from paused_at
             play_audio_from(paused_at)
-            start_time = time.time() - paused_at
-        target_time = start_time + idx * frame_delay
+            start = time.time() - paused_at
+        tgt = start + i * delay
         now = time.time()
-        sleep_for = target_time - now
+        sleep_for = tgt - now
         if sleep_for > 0:
             time.sleep(sleep_for)
-        print('\x1b[H', end='')  # Move cursor to home position for smooth redraw
-        frame_path = os.path.join(frames_folder, all_frames[idx])
-        print(pic_to_ascii(frame_path, wide), end='')
-        idx += 1
+        print('\x1b[H', end='')  # move cursor home, don't ask how it works
+        print(pic_to_ascii(os.path.join(folder, frames[i]), wide), end='')
+        i += 1
     stop_flag.set()
     pygame.mixer.music.stop()
     key_thread.join()
     pygame.mixer.quit()
 
+# main thing, asks stuff, runs stuff
 def main():
-    # The main show. Handles user questions.
+    extract_and_set_ffmpeg_bin()  # pulls ffmpeg from zip, sets env, whatever
     print('Turns videos into ugly terminal art. With sound.')
-    print('Created by a bored programmer. @github/SajagIN')
-
-    video = input('Enter the path to the video file (default: BadApple.mp4): ').strip() or 'BadApple.mp4'# Get video.
-    temp = input('Where to put all the temporary junk? (default: temp): ').strip() or 'temp' # Temp dir.
-    
+    print('Made by a lazy coder. @github/SajagIN')
+    vid = input('Video file? (default: BadApple.mp4): ').strip() or 'BadApple.mp4'
+    temp = input('Temp folder? (default: temp): ').strip() or 'temp'
     try:
-        width = int(input('How wide should the ASCII art be? (default: 80): ').strip() or 80) # Art width.
+        width = int(input('How wide? (default: 80): ').strip() or 80)
     except ValueError:
         width = 80
-        
     try:
-        fps = int(input('Frames per second? (default: 24): ').strip() or 24) # Play speed.
+        fps = int(input('FPS? (default: 24): ').strip() or 24)
     except ValueError:
         fps = 24
-        
+    print('Space = pause, Q = quit')
     try:
-        frames_folder, audio_file = get_stuff_from_video(video, temp, speed=fps) # Setup video.
-        print('Converting and playing video as ASCII... (streaming now!)')
-        play_ascii_video_stream(frames_folder, audio_file, speed=fps, wide=width, buffer_size=fps) # Play.
+        frames, audio = get_stuff_from_video(vid, temp, speed=fps)
+        print('Streaming ASCII video...')
+        play_ascii_video_stream(frames, audio, speed=fps, wide=width, buffer_size=fps)
     except Exception as e:
-        print(f'Ugh, something broke: {e}')
+        print(f'Nope, broke: {e}')
         sys.exit(1)
- 
+
 if __name__ == '__main__':
-    main() # Run it. Or don't. Whatever.
+    main()  # run it, or not, idc
