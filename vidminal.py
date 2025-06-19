@@ -197,7 +197,8 @@ def main():
     extract_and_set_ffmpeg_bin()  # pulls ffmpeg from zip, sets env, whatever
     print('Turns videos into ugly terminal art. With sound.')
     print('Made by a lazy coder. @github/SajagIN')
-    vid = input('Video file? (default: BadApple.mp4): ').strip() or 'BadApple.mp4'
+    vid_input = input('Video file? (default: BadApple.mp4): ').strip()
+    vid = find_resource_path(vid_input) if vid_input else find_resource_path('BadApple.mp4')
     temp = input('Temp folder? (default: temp): ').strip() or 'temp'
     try:
         width = int(input('How wide? (default: 80): ').strip() or 80)
