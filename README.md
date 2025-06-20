@@ -3,6 +3,12 @@ Ever wanted to watch videos but, like, without all those fancy pixels? Just good
 
 It's a super "optimized" tool that turns any video into a glorious, eye-straining ASCII art experience right in your terminal. Plus, it plays the audio. Because even a lazy developer knows you can't just have silent movies. 😴
 
+
+### A little sneek peek:
+https://github.com/user-attachments/assets/2813c448-8570-4419-b27a-13f7eec639c3
+
+
+
 ## 🚀 How to Get This Masterpiece Running
 
 ### From Binaries
@@ -16,8 +22,8 @@ Just download the right executable for your OS from the [Releases](https://githu
 - **moviepy**: For video wrangling. `pip install moviepy`
 - **pygame**: For sound. `pip install pygame`
 
-### No More FFmpeg Setup!
-You don't need to install ffmpeg yourself anymore. This repo ships with a compressed `ffmpeg_bin.7z` containing all the ffmpeg binaries for Windows, Mac, and Linux (even ARM stuff). The script will extract and use the right one for your system, automatically. So, yeah, just run it.
+### No FFmpeg Setup!
+You don't need to install ffmpeg yourself . This repo ships with a compressed `ffmpeg_bin.7z` containing all the ffmpeg binaries for Windows, Mac, and Linux (even ARM stuff). The script will extract and use the right one for your system, automatically. So, yeah, just run it.
 
 ## 🍿 Usage: "Watch" a Video
 Just run it. The script will ask you for everything (video file, width, fps, temp folder) like a lazy wizard. ✨
