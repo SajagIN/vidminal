@@ -5,7 +5,9 @@ It's a super "optimized" tool that turns any video into a glorious, eye-strainin
 
 
 ### A little sneek peek:
-https://github.com/user-attachments/assets/2813c448-8570-4419-b27a-13f7eec639c3
+
+
+https://github.com/user-attachments/assets/fbd1eaeb-4037-465c-b473-fa1c6f9ca26e
 
 
 
@@ -42,22 +44,26 @@ Or, if you downloaded a binary, just run it:
 ```
 Just follow the prompts. Or just hit Enter for the defaults. That's it.
 
-### Options (If You're Feeling Fancy)
-You don't need to remember any command-line arguments. The script will ask you for:
+## ⚙️ Options (If You're Feeling Fancy)
+You don't need to remember any command-line arguments. The program will create an `options.json` file the first time you run it, containing all the main settings:
+
 - Video file (default: BadApple.mp4)
 - Temp folder (default: temp)
-- Width (default: 80)
+- Width (default: 160)
 - FPS (default: 24)
 
-Just press Enter to accept the defaults, or type your own values. Easy.
+Just edit `options.json` to set your preferred defaults. The script will use these values every time you run it. No more prompts for width, fps, or temp folder—just set and forget!
 
-### ⚠️ Known Issues / "Features"
+![image](https://github.com/user-attachments/assets/1ea013a2-f8c1-46b8-970f-0f5828e45282)
+
+If you delete `options.json`, it'll be recreated with defaults next time you run the program.
+
+## ⚠️ Known Issues / "Features"
 - Terminal Size Matters: If your terminal is too small, things will look like a jumbled mess. Make it big! Or don't, I'm not your boss.
 - Performance: It's Python. It's ASCII. It might stutter. Don't come crying to me.
 - Temporary Files: It creates a bunch of image files and an audio file. It doesn't clean them up automatically. Why? **Because I'm lazy. Delete them yourself!** 🔥🗑️
 - ffmpeg will be extracted to the script's root folder if not already there. If you delete it, it'll just get extracted again. Magic.
 - **Full video path is required (No relative path)**
-- Subtitles must be in `.srt` or `.ass` format and named the same as your video file to be detected.
 
 ## Contributing (LOL)
 Sure, if you really wanna make this "better," feel free. But honestly, it works, right? So why bother? Issues and pull requests are technically welcome, I guess. 🙄
