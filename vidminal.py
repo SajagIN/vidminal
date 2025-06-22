@@ -1,11 +1,15 @@
-import os
-import sys
-import warnings
-warnings.filterwarnings('ignore')
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
-import contextlib
-import io
-# Suppress stderr globally (for moviepy, pygame, etc.)
+# imports: chaos and magic
+import os  # file goblin
+import sys  # sys go brr
+import warnings  # shhh
+warnings.filterwarnings('ignore')  # no warnings, only vibes
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'  # pygame, shut up
+import contextlib  # context is king
+import io  # string jail
+import shutil  # delete stuff fast
+import atexit  # clean up my mess
+
+# stderr: go to sleep
 class SuppressStderr:
     def __enter__(self):
         self._stderr = sys.stderr
@@ -14,20 +18,29 @@ class SuppressStderr:
         sys.stderr.close()
         sys.stderr = self._stderr
 
-with SuppressStderr():
-    import time
-    from PIL import Image
-    import threading
-    import platform
-    import pygame
-    from moviepy import VideoFileClip
-    import py7zr
-    import queue
-    import colorama
-    import multiprocessing
-    import json
+with SuppressStderr():  # silence is golden
+    import time  # tick tock
+    from PIL import Image  # pixel wizard
+    import threading  # spaghetti parallel
+    import platform  # what planet am I on
+    import pygame  # sound go beep
+    from moviepy import VideoFileClip  # video wrangler
+    import py7zr  # zip zap
+    import queue  # line up!
+    import colorama  # color go brr
+    import multiprocessing  # more chaos
+    import json  # config soup
+    import tempfile  # temp trash
 
-# finds stuff, works with PyInstaller too (hopefully)
+# nuke temp folder
+def cleanup_temp_folder(temp_path):
+    if os.path.exists(temp_path) and os.path.isdir(temp_path):
+        try:
+            shutil.rmtree(temp_path)
+        except Exception:
+            pass
+
+# find stuff, pyinstaller pain
 def find_resource_path(rel):
     try:
         base = sys._MEIPASS
@@ -35,46 +48,62 @@ def find_resource_path(rel):
         base = os.path.abspath('.')
     return os.path.join(base, rel)
 
-# pulls ffmpeg from zip, dumps in root, sets env, done
-def extract_and_set_ffmpeg_bin():
+# ffmpeg: now you see me
+@contextlib.contextmanager
+def managed_ffmpeg():
     sysname = platform.system().lower()
     arch = platform.machine().lower()
+    ffmpeg_bin_dir = find_resource_path(os.path.join('ffmpeg_bin'))
     if sysname == 'windows':
-        zip_path = find_resource_path('windows.7z')
+        zip_path = os.path.join(ffmpeg_bin_dir, 'windows.7z')
         ffmpeg_in_zip = 'ffmpeg.exe'
-        out_name = 'ffmpeg.exe'
+        suffix = '.exe'
     elif sysname == 'darwin':
-        zip_path = find_resource_path('mac.7z')
+        zip_path = os.path.join(ffmpeg_bin_dir, 'mac.7z')
         ffmpeg_in_zip = 'ffmpeg'
-        out_name = 'ffmpeg'
+        suffix = ''
     elif sysname == 'linux':
-        zip_path = find_resource_path('linux.7z')
+        suffix = ''
         if 'arm' in arch:
             if '64' in arch:
+                zip_path = os.path.join(ffmpeg_bin_dir, 'linux-arm-64.7z')
                 ffmpeg_in_zip = 'linux-arm-64/ffmpeg'
             else:
+                zip_path = os.path.join(ffmpeg_bin_dir, 'linux-armhf-32.7z')
                 ffmpeg_in_zip = 'linux-armhf-32/ffmpeg'
         elif '64' in arch:
+            zip_path = os.path.join(ffmpeg_bin_dir, 'linux-64.7z')
             ffmpeg_in_zip = 'linux-64/ffmpeg'
         else:
+            zip_path = os.path.join(ffmpeg_bin_dir, 'linux-32.7z')
             ffmpeg_in_zip = 'linux-32/ffmpeg'
-        out_name = 'ffmpeg'
-    else:
-        zip_path = None
-        ffmpeg_in_zip = None
-        out_name = 'ffmpeg'
-    if zip_path and ffmpeg_in_zip:
-        out_path = os.path.abspath(out_name)
-        if not os.path.exists(out_path):
-            with py7zr.SevenZipFile(zip_path, 'r') as archive:
-                archive.extract(targets=[ffmpeg_in_zip], path='.')
+    ffmpeg_path = None
+    original_ffmpeg_binary = os.environ.get('FFMPEG_BINARY')
+    try:
+        if zip_path and ffmpeg_in_zip and os.path.exists(zip_path):
+            with tempfile.TemporaryDirectory() as extract_dir:
+                with py7zr.SevenZipFile(zip_path, 'r') as archive:
+                    archive.extract(targets=[ffmpeg_in_zip], path=extract_dir)
+                extracted_ffmpeg = os.path.join(extract_dir, ffmpeg_in_zip)
+                with open(extracted_ffmpeg, 'rb') as src_f, tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_f:
+                    tmp_f.write(src_f.read())
+                    ffmpeg_path = tmp_f.name
             if sysname != 'windows':
-                os.chmod(out_path, 0o755)  # make executable
-        os.environ['FFMPEG_BINARY'] = out_path
-    else:
-        os.environ['FFMPEG_BINARY'] = 'ffmpeg'  # fallback, yolo
+                os.chmod(ffmpeg_path, 0o755)
+            os.environ['FFMPEG_BINARY'] = ffmpeg_path
+            yield ffmpeg_path
+        else:
+            os.environ['FFMPEG_BINARY'] = 'ffmpeg'
+            yield 'ffmpeg'
+    finally:
+        if ffmpeg_path and os.path.exists(ffmpeg_path):
+            os.remove(ffmpeg_path)
+        if original_ffmpeg_binary:
+            os.environ['FFMPEG_BINARY'] = original_ffmpeg_binary
+        elif 'FFMPEG_BINARY' in os.environ:
+            del os.environ['FFMPEG_BINARY']
 
-# turns video into frames & audio, dumps in folder
+# video to frames & noise
 def get_stuff_from_video(vid, out, speed=24, wide=160):
     if not os.path.exists(out):
         os.makedirs(out)
@@ -86,26 +115,23 @@ def get_stuff_from_video(vid, out, speed=24, wide=160):
         frame_paths = []
         for i, frame in enumerate(clip.iter_frames(fps=speed, dtype='uint8')):
             img = Image.fromarray(frame)
-            # Reduce image size early
             ratio = img.height / img.width
             tall = int(ratio * wide * 0.55)
             img = img.resize((wide, tall))
             frame_path = os.path.join(out, f'frame_{i+1:05d}.png')
             img.save(frame_path)
             frame_paths.append(frame_path)
-        # Multiprocessing: convert all frames to ASCII in parallel
         with multiprocessing.Pool() as pool:
             ascii_results = pool.map(convert_frame_to_ascii, [(fp, wide) for fp in frame_paths])
-        # Save ASCII frames as .txt for fast playback
-        for i, (ascii_txt, _) in enumerate(ascii_results): # Unpack only the text, ignore the actual_wide for saving
+        for i, (ascii_txt, _) in enumerate(ascii_results):
             txt_path = os.path.join(out, f'frame_{i+1:05d}.txt')
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(ascii_txt)
     print('Done.')
     return out, audio
 
+# read config, hope for best
 def load_options(options_path='options.json'):
-    # Load options from options.json, fallback to defaults if missing/empty
     defaults = {
         'chars': "█▓▒░",
         'gamma': 1.2,
@@ -128,6 +154,7 @@ def load_options(options_path='options.json'):
     except Exception:
         return defaults
 
+# image to ascii, rainbow puke
 def pic_to_ascii_from_pil(pic, wide=None, high=None):
     import shutil
     from colorama import Style
@@ -135,7 +162,6 @@ def pic_to_ascii_from_pil(pic, wide=None, high=None):
     chars = opts['chars']
     gamma = float(opts['gamma'])
     contrast = float(opts['contrast'])
-    # Dynamically determine width and height as 90% of terminal size if not provided
     if wide is None or high is None:
         try:
             size = shutil.get_terminal_size()
@@ -150,7 +176,6 @@ def pic_to_ascii_from_pil(pic, wide=None, high=None):
                 wide = 160
             if high is None:
                 high = 24
-    # Maintain aspect ratio
     ratio = pic.height / pic.width
     tall = int(ratio * wide * 0.55)
     if tall > high:
@@ -173,22 +198,22 @@ def pic_to_ascii_from_pil(pic, wide=None, high=None):
         if (i + 1) % wide == 0:
             out += Style.RESET_ALL + '\n'
     out += Style.RESET_ALL
-    return out, wide # Return the ASCII string and the actual width used
+    return out, wide
 
+# open image, get ascii
 def pic_to_ascii(img, wide=None, high=None):
     from PIL import Image
     pic = Image.open(img)
-    return pic_to_ascii_from_pil(pic, wide, high) # This will now return (out, wide)
+    return pic_to_ascii_from_pil(pic, wide, high)
 
-# Multiprocessing helper for frame conversion
-
+# frame to ascii, multiprocessing pain
 def convert_frame_to_ascii(args):
     frame_path, wide = args
     from PIL import Image
-    pic = Image.open(frame_path) # No change here, just for context
-    return pic_to_ascii_from_pil(pic, wide) # This will now return (out, wide)
+    pic = Image.open(frame_path)
+    return pic_to_ascii_from_pil(pic, wide)
 
-# plays sound, can pause/stop, whatever
+# play sound, hope for best
 def play_sound(audio, pause_flag, stop_flag):
     pygame.mixer.init()
     pygame.mixer.music.load(audio)
@@ -211,7 +236,7 @@ def play_sound(audio, pause_flag, stop_flag):
     pygame.mixer.music.stop()
     pygame.mixer.quit()
 
-# gets one char from user, non-blocking, magic
+# get one char, maybe
 def getch():
     if platform.system() == 'Windows':
         import msvcrt
@@ -231,11 +256,11 @@ def getch():
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-# clears terminal, because why not
+# clear screen, magic
 def clear_terminal():
     os.system('cls' if platform.system() == 'Windows' else 'clear')
 
-# plays ascii frames + sound, handles pause/quit
+# play ascii frames, chaos
 def play_ascii_video_stream(folder, audio, speed=24, wide=160, buffer_size=24):
     pygame.mixer.init()
     delay = 1.0 / speed
@@ -303,7 +328,7 @@ def get_stuff_from_video_stream(vid, out, speed=24, buffer_size=24):
         clip.audio.write_audiofile(audio, codec='libvorbis')
     frame_queue = queue.Queue(maxsize=buffer_size*2)
     total_frames = int(clip.fps * clip.duration)
-    video_duration = clip.duration  # <-- add this
+    video_duration = clip.duration
     def extract_frames():
         for i, frame in enumerate(clip.iter_frames(fps=speed, dtype='uint8')):
             frame_path = os.path.join(out, f'frame_{i+1:05d}.png')
@@ -490,7 +515,7 @@ def pic_from_ascii_txt(txt_path):
 
 # main thing, asks stuff, runs stuff
 def main():
-    extract_and_set_ffmpeg_bin()  # pulls ffmpeg from zip, sets env, whatever
+    # extract_and_set_ffmpeg_bin()  # pulls ffmpeg from zip, sets env, whatever
     from colorama import Fore, Style
     box_width = 64
     box_color = Fore.CYAN + Style.BRIGHT
@@ -538,19 +563,37 @@ def main():
     temp = opts['temp']
     width = int(opts['wide'])
     fps = int(opts['fps'])
+    atexit.unregister_all = getattr(atexit, 'unregister_all', lambda: None)  # For repeated runs in interactive mode
+    atexit.unregister_all()
+    atexit.register(lambda: cleanup_temp_folder(temp))
     try:
         frames, audio, frame_queue, total_frames, video_duration = get_stuff_from_video_stream(vid, temp, speed=fps, buffer_size=fps)
         print(Fore.GREEN + Style.BRIGHT + 'Streaming ASCII video...' + reset)
         play_ascii_video_stream_streaming(frames, audio, frame_queue, total_frames, speed=fps, wide=width, buffer_size=fps, video_duration=video_duration)
+    except (KeyboardInterrupt, SystemExit):
+        cleanup_temp_folder(temp)
+        raise
     except Exception as e:
         print(Fore.RED + f'Nope, broke: {e}' + reset)
+        cleanup_temp_folder(temp)
         sys.exit(1)
+    cleanup_temp_folder(temp)
 
 if __name__ == '__main__':
-    # If a video file is provided as a command-line argument,
-    # play it once and exit. Otherwise, loop for interactive mode.
-    if len(sys.argv) > 1:
-        main()
-    else:
-        while True:
-            main()
+    import signal
+    opts = load_options('options.json')
+    temp = opts['temp']
+    def handle_exit(*args):
+        cleanup_temp_folder(temp)
+        sys.exit(0)
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+    try:
+        with managed_ffmpeg():
+            if len(sys.argv) > 1:
+                main()
+            else:
+                while True:
+                    main()
+    finally:
+        cleanup_temp_folder(temp)

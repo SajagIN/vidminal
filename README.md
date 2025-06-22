@@ -1,75 +1,89 @@
-# 📺 Vidminal: 'Cause Who Needs Graphics Anyway? 🤷‍♀️
-Ever wanted to watch videos but, like, without all those fancy pixels? Just good ol' text? And maybe with sound too? No? Well, too bad, 'cause this thing does it! 🙄
-
-It's a super "optimized" tool that turns any video into a glorious, eye-straining ASCII art experience right in your terminal. Plus, it plays the audio. Because even a lazy developer knows you can't just have silent movies. 😴
-
+# 📺 Vidminal: Terminal Video as ASCII Art
 
 ### A little sneek peek:
-
-
 https://github.com/user-attachments/assets/fbd1eaeb-4037-465c-b473-fa1c6f9ca26e
 
+Ever wanted to watch videos as colored ASCII art in your terminal, with sound, and full keyboard controls? Now you can! This project turns any video into a glorious, eye-straining ASCII art experience—right in your terminal, with audio, seeking, and more.
 
+---
 
-## 🚀 How to Get This Masterpiece Running
+## 🚀 How to Run
 
-### From Binaries
-Just download the right executable for your OS from the [Releases](https://github.com/sajagin/vidminal/releases) page. No Python or dependencies needed. Run it and follow the prompts. All required files (including BadApple.mp4 and ffmpeg) are bundled.
+### 1. Download a Release (Recommended)
+- Get the right executable for your OS from the [Releases](https://github.com/sajagin/vidminal/releases) page.
+- No Python or dependencies needed. Just run it!
+- All required files (including BadApple.mp4 and ffmpeg) are bundled.
 
-### From Python Script
+### 2. Run from Python Source
+- **Python 3.8+** required.
+- Install dependencies:
+  ```bash
+  pip install Pillow moviepy pygame py7zr colorama
+  ```
+- Run the script:
+  ```bash
+  python vidminal.py
+  ```
 
-- Prerequisites (Stuff You Probably Already Have, Hopefully)
-- **Python**: 'Cause that's what this is written in. Duh.
-- **Pillow**: For image magic. `pip install Pillow`
-- **moviepy**: For video wrangling. `pip install moviepy`
-- **pygame**: For sound. `pip install pygame`
-
-### No FFmpeg Setup!
-You don't need to install ffmpeg yourself . This repo ships with a compressed `ffmpeg_bin.7z` containing all the ffmpeg binaries for Windows, Mac, and Linux (even ARM stuff). The script will extract and use the right one for your system, automatically. So, yeah, just run it.
+---
 
 ## 🆕 Playback Controls
 - **Space**: Pause/Resume
 - **Q**: Quit
 - **A/D**: Rewind/Forward 5 seconds
-- **←/→ (Arrow keys)**: Skip 1 frame
+- **←/→ (Arrow keys)**: Skip 1 second
 
-## 🍿 Usage: "Watch" a Video
-Just run it. The script will ask you for everything (video file, width, fps, temp folder) like a lazy wizard. ✨
-```bash
-python vidminal.py
-```
-Or, if you downloaded a binary, just run it:
-```bash
-./vidminal-windows.exe  # or vidminal-linux, vidminal-macos
-```
-Just follow the prompts. Or just hit Enter for the defaults. That's it.
+---
 
-## ⚙️ Options (If You're Feeling Fancy)
-You don't need to remember any command-line arguments. The program will create an `options.json` file the first time you run it, containing all the main settings:
+## 🍿 Usage
+- Run the script or binary. It will prompt for a video file (or use the default BadApple.mp4).
+- All settings (width, fps, temp folder) are stored in `options.json` after first run. Edit this file to change defaults.
+- The program will extract and use the correct ffmpeg binary for your OS automatically—no setup needed!
 
-- Video file (default: BadApple.mp4)
-- Temp folder (default: temp)
-- Width (default: 160)
-- FPS (default: 24)
+---
 
-Just edit `options.json` to set your preferred defaults. The script will use these values every time you run it. No more prompts for width, fps, or temp folder—just set and forget!
+## ⚙️ Options
+- `options.json` is created on first run. You can edit it to set:
+  - Video file (default: BadApple.mp4)
+  - Temp folder (default: temp)
+  - Width (default: 160)
+  - FPS (default: 24)
+- No more prompts for width, fps, or temp folder—just set and forget!
 
-![image](https://github.com/user-attachments/assets/1ea013a2-f8c1-46b8-970f-0f5828e45282)
+---
 
-If you delete `options.json`, it'll be recreated with defaults next time you run the program.
+## 🧹 Cleanup
+- All temporary files (frames, audio, temp ffmpeg) are deleted automatically when the program exits, even if you quit early or force close.
 
-## ⚠️ Known Issues / "Features"
-- Terminal Size Matters: If your terminal is too small, things will look like a jumbled mess. Make it big! Or don't, I'm not your boss.
-- Performance: It's Python. It's ASCII. It might stutter. Don't come crying to me.
-- Temporary Files: It creates a bunch of image files and an audio file. It doesn't clean them up automatically. Why? **Because I'm lazy. Delete them yourself!** 🔥🗑️
-- ffmpeg will be extracted to the script's root folder if not already there. If you delete it, it'll just get extracted again. Magic.
+---
+
+## 📖 How Does It Work?
+- See [WORKING.md](./WORKING.md) for a full, beginner-friendly explanation of every part of the code, how ffmpeg works, and how everything fits together.
+
+---
+
+## ⚠️ Known Issues / Notes
+- **Terminal Size Matters:** If your terminal is too small, the video will look bad. Make it big!
+- **Performance:** It's Python and ASCII. It might stutter on slow machines or huge videos.
+- **ffmpeg:** You do NOT need to install ffmpeg yourself. The right binary is extracted and used automatically.
 - **Full video path is required (No relative path)**
 
-## Contributing (LOL)
-Sure, if you really wanna make this "better," feel free. But honestly, it works, right? So why bother? Issues and pull requests are technically welcome, I guess. 🙄
+---
 
-# License
-This project is probably under some open-source license. Just assume you can do whatever with it, but don't blame me if it breaks your computer. Or your eyes. 😜
+## Contributing
+Pull requests and issues are welcome! See the code and [WORKING.md](./WORKING.md) for details.
 
-#### PS: It's fun sometimes written a README from hand without any tool. 😆
-#### added `BadApple.mp4` in repo for testing. It's literally the best thing after "Hello World".
+---
+
+## License
+MIT or similar. Use at your own risk. Don't blame me if your terminal melts.
+
+---
+
+## Credits
+- Bad Apple!! video for testing
+- All the open-source libraries used
+
+---
+
+For a full technical breakdown, see [WORKING.md](./WORKING.md).
