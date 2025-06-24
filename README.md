@@ -46,11 +46,18 @@ Ever wanted to watch videos as colored ASCII art in your terminal, with sound, a
 
 ## ⚙️ Options
 - `options.json` is created on first run. You can edit it to set:
-  - Video file (default: BadApple.mp4)
-  - Temp folder (default: temp)
-  - Width (default: 160)
-  - FPS (default: 24)
-- No more prompts for width, fps, or temp folder—just set and forget!
+  - `chars`: custom characters for video (when `ascii_chars_set` is set to `custom`)
+  - `temp`: folder (default: temp)
+  - `width`: (default: 160)
+  - `FPS`: (default: 24)
+  - `ascii_chars_set`: Choose from predefined ASCII character sets ( "`default`", "`detailed`", "`simple`" and "`custom`").
+  - `audio_volume_start`: Set the initial playback volume (0.0 to 1.0).
+  - `default_video_path`: Specify a default video file to load on startup.
+  - `show_ui_on_start`: Toggle the welcome UI box on startup.
+  - `clear_screen_on_resize`: Control if the terminal clears when resized.
+  - `buffering_message`: Customize the "Buffering..." text.
+  - `seek_jump_seconds`: Adjust the jump duration for A/D keys.
+  - `fine_seek_seconds`: Adjust the jump duration for arrow keys.
 
 ---
 

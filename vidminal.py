@@ -2,13 +2,18 @@
 import os  # file goblin
 import sys  # sys go brr
 import warnings  # shhh
-warnings.filterwarnings('ignore')  # no warnings, only vibes
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'  # pygame, shut up
 import contextlib  # context is king
 import io  # string jail
 import shutil  # delete stuff fast
 import atexit  # clean up my mess
 import subprocess  # command line wizard
+import signal
+import re
+import shutil
+from colorama import Fore, Style
+
+warnings.filterwarnings('ignore')  # no warnings, only vibes
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'  # pygame, shut up
 
 # stderr: go to sleep
 class SuppressStderr:
@@ -20,18 +25,18 @@ class SuppressStderr:
         sys.stderr = self._stderr
 
 with SuppressStderr():  # silence is golden
-    import time  # tick tock
-    from PIL import Image  # pixel wizard
-    import threading  # spaghetti parallel
-    import platform  # what planet am I on
-    import pygame  # sound go beep
-    from moviepy import VideoFileClip  # video wrangler
-    import py7zr  # zip zap
-    import queue  # line up!
-    import colorama  # color go brr
-    import multiprocessing  # more chaos
-    import json  # config soup
-    import tempfile  # temp trash
+        import time  # tick tock
+        from PIL import Image  # pixel wizard
+        import threading  # spaghetti parallel
+        import platform  # what planet am I on
+        import pygame  # sound go beep
+        from moviepy import VideoFileClip  # video wrangler
+        import py7zr  # zip zap
+        import queue  # line up!
+        import colorama  # color go brr
+        import multiprocessing  # more chaos
+        import json  # config soup
+        import tempfile  # temp trash
 
 # nuke temp folder
 def cleanup_temp_folder(temp_path):
@@ -139,7 +144,15 @@ def load_options(options_path='options.json'):
         'contrast': 1.5,
         'temp': 'temp',
         'wide': 160,
-        'fps': 24
+        'fps': 24,
+        'ascii_chars_set': "default",
+        'audio_volume_start': 1.0,
+        'default_video_path': "",
+        'show_ui_on_start': True,
+        'clear_screen_on_resize': True,
+        'buffering_message': "Buffering...",
+        'seek_jump_seconds': 5,
+        'fine_seek_seconds': 1
     }
     if not os.path.exists(options_path):
         with open(options_path, 'w', encoding='utf-8') as f:
@@ -151,16 +164,30 @@ def load_options(options_path='options.json'):
         for k in defaults:
             if k not in opts or opts[k] == '' or opts[k] is None:
                 opts[k] = defaults[k]
+        opts['gamma'] = float(opts['gamma'])
+        opts['contrast'] = float(opts['contrast'])
+        opts['wide'] = int(opts['wide'])
+        opts['fps'] = int(opts['fps'])
+        opts['audio_volume_start'] = float(opts['audio_volume_start'])
+        opts['seek_jump_seconds'] = int(opts['seek_jump_seconds'])
+        opts['fine_seek_seconds'] = int(opts['fine_seek_seconds'])
         return opts
     except Exception:
         return defaults
 
 # image to ascii, rainbow puke
 def pic_to_ascii_from_pil(pic, wide=None, high=None):
-    import shutil
-    from colorama import Style
     opts = load_options()
-    chars = opts['chars']
+    CHAR_SETS = {
+        "default": "█▓▒░",
+        "detailed": "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ",
+        "simple": " .:-=+*#%@"
+    }
+    chars_key = opts.get('ascii_chars_set', 'default')
+    if chars_key == 'custom':
+        chars = opts.get('chars', CHAR_SETS['default'])
+    else:
+        chars = CHAR_SETS.get(chars_key, CHAR_SETS['default'])
     gamma = float(opts['gamma'])
     contrast = float(opts['contrast'])
     if wide is None or high is None:
@@ -197,20 +224,18 @@ def pic_to_ascii_from_pil(pic, wide=None, high=None):
         b = min(max(b, 0), 255)
         out += f'\033[38;2;{r};{g};{b}m{chars[p * (len(chars) - 1) // 255]}'
         if (i + 1) % wide == 0:
-            out += Style.RESET_ALL + '\n'
-    out += Style.RESET_ALL
+            out += Fore.RESET + '\n'
+    out += Fore.RESET
     return out, wide
 
 # open image, get ascii
 def pic_to_ascii(img, wide=None, high=None):
-    from PIL import Image
     pic = Image.open(img)
     return pic_to_ascii_from_pil(pic, wide, high)
 
 # frame to ascii, multiprocessing pain
 def convert_frame_to_ascii(args):
     frame_path, wide = args
-    from PIL import Image
     pic = Image.open(frame_path)
     return pic_to_ascii_from_pil(pic, wide)
 
@@ -338,20 +363,21 @@ def get_stuff_from_video_stream(vid, out, speed=24, buffer_size=24):
                 frame_queue.put_nowait(frame_path)
             except queue.Full:
                 pass  # Don't block extraction, just skip putting in queue
-        frame_queue.put(None)  # Sentinel for end
+        frame_queue.put(None)
     threading.Thread(target=extract_frames, daemon=True).start()
     return out, audio, frame_queue, total_frames, video_duration
 
 # plays ascii video + audio from stream, handles pause/quit
-def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, speed=24, wide=160, buffer_size=24, video_duration=None):
+def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, speed=24, wide=160, buffer_size=24, video_duration=None, seek_jump_seconds=5, fine_seek_seconds=1):
     import queue as pyqueue
     pygame.mixer.init()
     delay = 1.0 / speed
     stop_flag = threading.Event()
     pause_flag = threading.Event()
     pause_flag.clear()
+    opts = load_options()
     playback_state = {
-        'volume': 1.0,
+        'volume': float(opts.get('audio_volume_start', 1.0)),
         'is_muted': False,
     }
     rewind_forward = pyqueue.Queue()
@@ -377,21 +403,20 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
                 # Decrease volume, ensure it doesn't go below 0
                 playback_state['volume'] = max(0.0, round(playback_state['volume'] - 0.1, 1))
             elif key in ('+', '='):
-                # Increase volume, ensure it doesn't go above 1.0, and unmute
                 playback_state['volume'] = min(1.0, round(playback_state['volume'] + 0.1, 1))
                 playback_state['is_muted'] = False
             elif key in ('a', 'A'):
-                rewind_forward.put(-5 * speed)  # rewind 5s
+                rewind_forward.put(-seek_jump_seconds * speed)
             elif key in ('d', 'D'):
-                rewind_forward.put(5 * speed)   # forward 5s
+                rewind_forward.put(seek_jump_seconds * speed)
             elif is_windows:
                 # Windows arrow keys: first getch() returns '\xe0', next is code
                 if key in ('\xe0', '\x00'):
                     next_key = getch()
                     if next_key == 'M':  # right arrow
-                        rewind_forward.put(speed)
+                        rewind_forward.put(fine_seek_seconds * speed)
                     elif next_key == 'K':  # left arrow
-                        rewind_forward.put(-speed)
+                        rewind_forward.put(-fine_seek_seconds * speed)
             else:
                 # Unix: arrow keys are '\x1b', '[', 'C'/'D'
                 if key == '\x1b':
@@ -399,18 +424,18 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
                     if next1 == '[':
                         next2 = getch()
                         if next2 == 'C':  # right arrow
-                            rewind_forward.put(speed)
+                            rewind_forward.put(fine_seek_seconds * speed)
                         elif next2 == 'D':  # left arrow
-                            rewind_forward.put(-speed)
+                            rewind_forward.put(-fine_seek_seconds * speed)
             time.sleep(0.05)
 
     key_thread = threading.Thread(target=keyboard_listener, daemon=True)
     key_thread.start()
 
-    def play_audio_from(pos):
+    def play_audio_from(pos, fade_ms=100):
         pygame.mixer.music.load(audio)
         pygame.mixer.music.set_volume(0.0 if playback_state['is_muted'] else playback_state['volume'])
-        pygame.mixer.music.play(start=pos)
+        pygame.mixer.music.play(start=pos, fade_ms=fade_ms)
 
     def format_time(t):
         t = int(t)
@@ -418,7 +443,7 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
 
     print('\x1b[2J', end='')  # clear screen
     start = time.time()
-    play_audio_from(0)
+    play_audio_from(0, fade_ms=0)
     i = 0
     frames_buffer = []
     # Pre-buffer
@@ -427,35 +452,30 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
         if frame_path is None:
             break
         frames_buffer.append(frame_path)
-    # Use actual video duration if provided
     total_time = video_duration if video_duration is not None else (total_frames / speed if total_frames > 0 else 0)
-    # Track terminal size for optimized clearing
     import shutil
     last_term_size = shutil.get_terminal_size()
+    last_audio_seek = 0
     while not stop_flag.is_set() and frames_buffer:
         # Handle rewind/forward requests
         jump = 0
         while not rewind_forward.empty():
             jump += rewind_forward.get()
         if jump != 0:
-            # --- Begin robust seek logic: buffer only target frame, not intermediates ---
             target_i = max(0, min(i + jump, total_frames - 1))
-            pygame.mixer.music.pause()
+            pygame.mixer.music.fadeout(50)  # fade out audio before seek
             frames_buffer.clear()
-            # Wait for the target frame to be extracted (but do not display intermediates)
             frame_path = os.path.join(folder, f'frame_{target_i+1:05d}.png')
             wait_count = 0
             while not os.path.exists(frame_path):
-                # Always clear screen on seek
-                print('\x1b[2J\x1b[H', end='') # Clear screen and move cursor home
+                print('\x1b[2J\x1b[H', end='')
                 print('Buffering...'.center(wide), end='\n')
-                time.sleep(0.05)
+                time.sleep(0.02)
                 wait_count += 1
                 if wait_count > 400:
                     break
             if os.path.exists(frame_path):
                 frames_buffer.append(frame_path)
-            # Fill buffer with next frames if available, always from disk
             for idx in range(target_i+1, min(target_i+1+buffer_size, total_frames)):
                 next_path = os.path.join(folder, f'frame_{idx+1:05d}.png')
                 if os.path.exists(next_path):
@@ -463,13 +483,10 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
                 else:
                     break
             i = target_i
-            # Set start time so seek bar is correct
             start = time.time() - i * delay
-            # Resume audio at the new position only when frame is ready
             if frames_buffer:
-                play_audio_from(i * delay)
-            time.sleep(0.1)
-            # --- End robust seek logic ---
+                play_audio_from(i * delay, fade_ms=50)
+                last_audio_seek = time.time()
         if pause_flag.is_set():
             pygame.mixer.music.pause()
             paused_at = i * delay
@@ -477,58 +494,51 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
                 time.sleep(0.1)
             if stop_flag.is_set():
                 break
-            play_audio_from(paused_at)
+            play_audio_from(paused_at, fade_ms=50)
+            last_audio_seek = time.time()
             start = time.time() - paused_at
         tgt = start + i * delay
         now = time.time()
         sleep_for = tgt - now
         if sleep_for > 0:
             time.sleep(sleep_for)
-        
-        # Apply volume changes from keyboard continuously
         current_vol = 0.0 if playback_state['is_muted'] else playback_state['volume']
         if pygame.mixer.music.get_volume() != current_vol:
             pygame.mixer.music.set_volume(current_vol)
-        # Check terminal size
         try:
             term_size = shutil.get_terminal_size()
         except Exception:
             term_size = last_term_size
         if term_size != last_term_size:
-            print('\x1b[2J\x1b[H', end='')  # Clear screen and move cursor home
+            if opts.get('clear_screen_on_resize', True):
+                print('\x1b[2J\x1b[H', end='')
             last_term_size = term_size
         else:
-            print('\x1b[H', end='')  # Just move cursor home
-        actual_frame_wide = wide # Initialize with the requested wide, will be updated if frame is rendered
+            print('\x1b[H', end='')
+        actual_frame_wide = wide
         if frames_buffer:
             ascii_frame_output, actual_frame_wide = pic_to_ascii(frames_buffer[0], wide)
             print(ascii_frame_output, end='')
         else:
-            print('Buffering...'.center(actual_frame_wide), end='\n') # Use actual_frame_wide for centering
-        # --- Seek bar with play/pause and time ---
+            print('Buffering...'.center(actual_frame_wide), end='\n')
         play_emoji = '⏸️' if not pause_flag.is_set() else '▶️'
-        
-        # Volume UI
         vol_bar_width = 10
         vol_icon = '🔇' if playback_state['is_muted'] or playback_state['volume'] == 0 else '🔊'
         if playback_state['is_muted']:
             vol_bar = '-' * vol_bar_width
         else:
-            vol_level = int(playback_state['volume'] * vol_bar_width)
+            vol_level = int(round(playback_state['volume'] * vol_bar_width))
             vol_bar = '█' * vol_level + '-' * (vol_bar_width - vol_level)
         vol_str = f" {vol_icon}[{vol_bar}]"
-
         time_str = f"{format_time(i / speed)} / {format_time(total_time)}"
         fixed_len = 2 + 4 + len(time_str) + len(vol_str)
-        bar_width = max(1, actual_frame_wide - fixed_len) # Use actual_frame_wide here
+        bar_width = max(1, actual_frame_wide - fixed_len)
         bar_pos = int((i / (total_frames - 1)) * bar_width) if total_frames > 1 else 0
         bar = '█' * bar_pos + '-' * (bar_width - bar_pos)
         print(f"{play_emoji} [{bar}] {time_str}{vol_str}")
-        # --- End seek bar ---
         i += 1
         if frames_buffer:
             frames_buffer.pop(0)
-        # Always refill buffer from disk after skip
         next_idx = i + len(frames_buffer)
         if next_idx < total_frames:
             next_path = os.path.join(folder, f'frame_{next_idx+1:05d}.png')
@@ -545,15 +555,12 @@ def pic_from_ascii_txt(txt_path):
 
 # main thing, asks stuff, runs stuff
 def main():
-    # extract_and_set_ffmpeg_bin()  # pulls ffmpeg from zip, sets env, whatever
-    from colorama import Fore, Style
     box_width = 64
     box_color = Fore.CYAN + Style.BRIGHT
     text_color = Fore.YELLOW + Style.BRIGHT
     reset = Style.RESET_ALL
     def box_line(text, color=text_color):
         # Remove ANSI codes for length calculation
-        import re
         ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
         visible = ansi_escape.sub('', text)
         pad = box_width - 2 - len(visible)
@@ -569,8 +576,10 @@ def main():
         f"{box_color}╚{'═'* (box_width-2)}╝{reset}",
         ""
     ]
-    print("\n".join(lines))
-    opts = load_options('options.json')
+    opts = load_options('options.json') # Load options again to ensure latest are used
+    if opts['show_ui_on_start']:
+        print("\n".join(lines))
+
 
     vid_path = sys.argv[1] if len(sys.argv) > 1 else ""
     is_from_arg = bool(vid_path)
@@ -579,18 +588,33 @@ def main():
         # If no argument, prompt the user
         vid_path = input(Fore.CYAN + Style.BRIGHT + 'Video file?' + reset + f' (default: {Fore.YELLOW}BadApple.mp4{reset}): ').strip()
 
+        if not vid_path: # If user pressed enter without input, and no sys.argv
+            if opts['default_video_path']:
+                vid_path = opts['default_video_path']
+            else:
+                vid_path = find_resource_path('BadApple.mp4') # Fallback to bundled BadApple
+
+        if not vid_path: # If user pressed enter without input, and no sys.argv
+            if opts['default_video_path']:
+                vid_path = opts['default_video_path']
+            else:
+                vid_path = find_resource_path('BadApple.mp4') # Fallback to bundled BadApple
+
     if vid_path:
         if is_from_arg:
             print(Fore.CYAN + Style.BRIGHT + f"Opening: {os.path.basename(vid_path)}" + reset)
         vid = os.path.abspath(vid_path)
-        if not os.path.exists(vid):
-            print(Fore.RED + f'Error: File not found at "{vid}"' + reset)
-            if is_from_arg:
-                time.sleep(3) # Pause for user to see error
-            sys.exit(1)
     else:
-        # Default to the bundled BadApple.mp4
+        # This else block should ideally not be reached if logic above is correct
+        # but as a safeguard, use BadApple.mp4
         vid = find_resource_path('BadApple.mp4')
+
+    if not os.path.exists(vid):
+        print(Fore.RED + f'Error: File not found at "{vid}"' + reset)
+        if is_from_arg:
+            time.sleep(3) # Pause for user to see error
+        sys.exit(1)
+
 
     temp = opts['temp']
     width = int(opts['wide'])
@@ -627,10 +651,11 @@ def main():
         sys.exit(1)
     # --- End downscale logic ---
 
-    try:
-        frames, audio, frame_queue, total_frames, video_duration = get_stuff_from_video_stream(vid, temp, speed=fps, buffer_size=fps)
+    try: # Pass new seek parameters to streaming function
+        frames, audio, frame_queue, total_frames, video_duration = get_stuff_from_video_stream(vid, temp, speed=fps, buffer_size=fps) # Note: get_stuff_from_video_stream doesn't need wide
         print(Fore.GREEN + Style.BRIGHT + 'Streaming ASCII video...' + reset)
-        play_ascii_video_stream_streaming(frames, audio, frame_queue, total_frames, speed=fps, wide=width, buffer_size=fps, video_duration=video_duration)
+        play_ascii_video_stream_streaming(frames, audio, frame_queue, total_frames, speed=fps, wide=width, buffer_size=fps, video_duration=video_duration,
+                                           seek_jump_seconds=opts['seek_jump_seconds'], fine_seek_seconds=opts['fine_seek_seconds'])
     except (KeyboardInterrupt, SystemExit):
         cleanup_temp_folder(temp)
         raise
@@ -641,7 +666,6 @@ def main():
     cleanup_temp_folder(temp)
 
 if __name__ == '__main__':
-    import signal
     opts = load_options('options.json')
     temp = opts['temp']
     def handle_exit(*args):
