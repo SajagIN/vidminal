@@ -44,20 +44,21 @@ Ever wanted to watch videos as colored ASCII art in your terminal, with sound, a
 
 ---
 
-## ⚙️ Options
-- `options.json` is created on first run. You can edit it to set:
-  - `chars`: custom characters for video (when `ascii_chars_set` is set to `custom`)
-  - `temp`: folder (default: temp)
-  - `width`: (default: 160)
-  - `FPS`: (default: 24)
-  - `ascii_chars_set`: Choose from predefined ASCII character sets ( "`default`", "`detailed`", "`simple`" and "`custom`").
-  - `audio_volume_start`: Set the initial playback volume (0.0 to 1.0).
-  - `default_video_path`: Specify a default video file to load on startup.
-  - `show_ui_on_start`: Toggle the welcome UI box on startup.
-  - `clear_screen_on_resize`: Control if the terminal clears when resized.
-  - `buffering_message`: Customize the "Buffering..." text.
-  - `seek_jump_seconds`: Adjust the jump duration for A/D keys.
-  - `fine_seek_seconds`: Adjust the jump duration for arrow keys.
+## ⚙️ Options (`options.json`)
+This file is created on first run. You can edit it to change default behavior:
+
+- **`temp`**: Name of the temporary folder for frames and audio (default: `temp`).
+- **`wide`**: Default width of the ASCII art (default: `160`). The player will still resize dynamically to your terminal.
+- **`fps`**: The frames-per-second to play the video at (default: `24`).
+- **`ascii_chars_set`**: Choose a character set for the ASCII art: "`default`", "`detailed`", "`simple`", or "`custom`".
+- **`chars`**: If `ascii_chars_set` is `custom`, this string of characters will be used (from darkest to lightest).
+- **`gamma` / `contrast`**: Adjust the visual look of the ASCII video.
+- **`audio_volume_start`**: Initial volume when a video starts (from `0.0` to `1.0`).
+- **`default_video_path`**: Set a path to a video file to be used as the default if you don't provide one.
+- **`show_ui_on_start`**: Show the fancy welcome box on startup (`true` or `false`).
+- **`clear_screen_on_resize`**: Whether to clear the whole screen when the terminal is resized (`true` or `false`).
+- **`seek_jump_seconds`**: How many seconds to jump with the `A`/`D` keys (default: `5`).
+- **`fine_seek_seconds`**: How many seconds to jump with the arrow keys (default: `1`).
 
 ---
 

@@ -121,9 +121,18 @@ This section explains every function in `vidminal.py` and its role in the overal
 - **Called by:** The `if __name__ == '__main__':` block to wrap the entire application's execution.
 
 ### `load_options(options_path='options.json')`
-- **Purpose:** Loads user-configurable settings from `options.json` or creates the file with default values if it doesn't exist.
+- **Purpose:** Loads user-configurable settings from `options.json`. If the file doesn't exist or is invalid, it creates one with default values..
 - **How it works:**
-  1.  Defines a `defaults` dictionary with settings like ASCII characters, gamma, contrast, temp folder name, default width, and FPS.
+    1.  Defines a `defaults` dictionary with a comprehensive set of options:
+      - `chars`, `gamma`, `contrast`: For ASCII rendering.
+      - `temp`, `wide`, `fps`: For general playback.
+      - `ascii_chars_set`: Pre-defined character sets (`default`, `detailed`, `simple`).
+      - `audio_volume_start`: Initial volume.
+      - `default_video_path`: A fallback video to use.
+      - `show_ui_on_start`: Toggles the welcome message.
+      - `clear_screen_on_resize`: Controls terminal clearing behavior.
+      - `seek_jump_seconds`, `fine_seek_seconds`: Configurable seek times.
+
   2.  If `options.json` doesn't exist, it creates it with these defaults.
   3.  If it exists, it loads the JSON. It then iterates through the `defaults` to ensure all expected keys are present in the loaded options, filling in any missing or empty values with their defaults.
 - **Called by:** `main()` and `pic_to_ascii_from_pil()`.
@@ -131,7 +140,7 @@ This section explains every function in `vidminal.py` and its role in the overal
 ### `pic_to_ascii_from_pil(pic, wide=None, high=None)`
 - **Purpose:** The core function that converts a Pillow `Image` object into a string of colored ASCII art, dynamically adapting to terminal size.
 - **How it works:**
-  1.  **Loads Options:** Retrieves ASCII characters, gamma, and contrast settings from `options.json`.
+  1.  **Loads Options:** Retrieves ASCII character settings, gamma, and contrast from `options.json`. It supports multiple character sets (`default`, `detailed`, `simple`) and a user-defined `custom` set.
   2.  **Determines Output Dimensions:**
       *   If `wide` or `high` are `None` (which they are during real-time playback), it uses `shutil.get_terminal_size()` to get the current terminal's width and height. It then calculates the optimal `wide` and `tall` (height) for the ASCII art, preserving the video's aspect ratio and ensuring it fits within the terminal.
       *   It uses a `0.55` factor for `tall` calculation because terminal characters are typically taller than they are wide.
@@ -155,34 +164,27 @@ This section explains every function in `vidminal.py` and its role in the overal
 - **Called by:** `keyboard_listener()` to detect user key presses.
 
 ### `clear_terminal()`
-- **Purpose:** Clears the entire terminal screen.
-- **How it works:** Executes system-specific commands: `cls` for Windows and `clear` for Unix-like systems.
-- **Called by:** Not directly called in the current main playback loop, but a common utility function. The playback loop uses ANSI escape codes (`\x1b[2J\x1b[H`) for more efficient clearing.
+- **Purpose:** A utility function to clear the entire terminal screen by executing system-specific commands (`cls` or `clear`). The main playback loop uses more direct ANSI escape codes for efficiency.
 
 ### `get_stuff_from_video_stream(vid, out, speed=24, buffer_size=24)`
-- **Purpose:** Pre-processes the video (downscaling if needed), extracts its audio, and starts a background thread to extract video frames as PNG images, putting their paths into a queue for the main playback loop.
-- **How it works:**
+- **Purpose:** Extracts the audio from a video and starts a background thread to extract video frames as PNG images, putting their file paths into a queue for the main playback loop.- **How it works:**
   1.  **Temporary Folder Setup:** Ensures the `out` directory exists.
-  2.  **144p Downscaling (Optimization):**
-      *   Loads the `original_clip` using `VideoFileClip`.
-      *   If `original_clip.h` (height) is greater than 144 pixels, it prints a message, resizes the clip to `height=144`, and writes this `downscaled_clip` to a temporary MP4 file using `libx264` codec with `ultrafast` preset (for speed).
-      *   The `original_clip` is closed, and the `clip` variable for subsequent operations is set to the `downscaled_clip`. If no downscaling is needed, `clip` remains the `original_clip`.
-  3.  **Audio Extraction:** Extracts the audio track from the (potentially downscaled) `clip` and saves it as `audio.ogg`. `contextlib.redirect_stdout/stderr` are used to suppress `moviepy`'s verbose output.
-  4.  **`frame_queue`:** Initializes a `thread_queue.Queue` (a thread-safe queue) to hold the paths of the extracted PNG frames. This queue acts as a buffer between the frame extraction thread and the main playback thread.
-  5.  **`extract_frames_worker()` (Threaded):**
-      *   This nested function runs in a separate `threading.Thread`.
+  2.  **Audio Extraction:** Uses `moviepy` to extract the audio track from the `vid` file and saves it as `audio.ogg`. `contextlib.redirect_stdout/stderr` are used to suppress `moviepy`'s verbose output.
+  3.  **`frame_queue`:** Initializes a `thread_queue.Queue` (a thread-safe queue) to hold the paths of the extracted PNG frames. This queue acts as a buffer between the frame extraction thread and the main playback thread.
+  4.  **`extract_frames_worker()` (Threaded):**      *   This nested function runs in a separate `threading.Thread`.
       *   It iterates through `clip.iter_frames()`, saving each frame as a PNG file (e.g., `frame_00001.png`) in the `out` directory.
       *   The path of each saved PNG is put into `frame_queue`.
       *   A `None` sentinel is put into the queue when all frames are extracted, signaling the end.
       *   A `finally` block ensures `clip.close()` is called to release the video file handle, preventing resource leaks.
-  6.  **Starts Thread:** The `extract_frames_worker` is started in a `threading.Thread` with `daemon=True` (so it exits when the main program exits).
-  7.  **Returns:** The temporary folder path, audio path, `frame_queue`, total frames, and video duration.
+  5.  **Starts Thread:** The `extract_frames_worker` is started in a `threading.Thread` with `daemon=True` (so it exits when the main program exits).
+  6.  **Returns:** The temporary folder path, audio path, `frame_queue`, total frames, and video duration.
 - **Called by:** `main()`.
 
-### `play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, speed=24, wide=160, buffer_size=24, video_duration=None)`
+### `play_ascii_video_stream_streaming(...)`
 - **Purpose:** This is the heart of the video player. It plays the ASCII video and audio in real-time, handles user input, dynamic resizing, seeking, and volume control.
 - **How it works:**
   1.  **Initialization:**
+      *   Loads options from `options.json` to get settings like initial volume and seek durations.
       *   Initializes `pygame.mixer` for audio playback.
       *   Sets `delay` per frame based on `speed` (FPS).
       *   Uses `threading.Event` objects (`stop_flag`, `pause_flag`) for inter-thread communication (to signal quit/pause).
@@ -190,15 +192,16 @@ This section explains every function in `vidminal.py` and its role in the overal
       *   `rewind_forward` is a `thread_queue.Queue` used to pass seek commands from the keyboard listener.
   2.  **`keyboard_listener()` (Threaded):**
       *   Runs in a separate `threading.Thread` to continuously read keyboard input using `getch()`.
-      *   Handles `Space` (pause/play), `Q` (quit), `M` (mute/unmute), `+/-` (volume up/down), `A/D` (seek 5s), and arrow keys (seek 1s).
+      *   Handles `Space` (pause/play), `Q` (quit), `M` (mute/unmute), `+/-` (volume up/down), `A/D` (seek), and arrow keys (fine seek). The seek durations are configurable in `options.json`.
       *   Updates `pause_flag`, `stop_flag`, `playback_state`, and `rewind_forward` queue based on input.
-  3.  **`play_audio_from(pos)`:** Loads and plays the audio from a specific `pos` (timestamp). It also sets the volume based on `playback_state`.
+  3.  **`play_audio_from(pos)`:** Loads and plays the audio from a specific `pos` (timestamp). It also sets the volume based on `playback_state`. It includes a fade-in effect for smoother audio transitions after seeking.
   4.  **`format_time(t)`:** Formats a time in seconds into `HH:MM:SS` string.
   5.  **Pre-buffering:** Fills `frames_buffer` with an initial set of PNG paths from `frame_queue`.
   6.  **Main Playback Loop:** `while not stop_flag.is_set() and frames_buffer:`
       *   **Seek Handling:** Checks `rewind_forward` queue for jump commands. If a jump occurs:
           *   Calculates `target_i` (target frame index).
-          *   Pauses audio, clears `frames_buffer`.
+          *   Pauses and fades out audio.
+          *   Clears the internal frame buffer.
           *   **Robust Seek:** Waits for the specific target PNG file to exist on disk (extracted by `extract_frames_worker`).
           *   Refills `frames_buffer` with the target PNG and subsequent PNGs from disk.
           *   Resumes audio from the new position.
@@ -232,38 +235,40 @@ This section explains every function in `vidminal.py` and its role in the overal
   3.  **Get Video Path:**
       *   Checks `sys.argv` for a video file path provided as a command-line argument.
       *   If no argument, it prompts the user for a video file path.
+      *   If the user provides no input, it checks for a `default_video_path` in `options.json`.
       *   If still no path, it defaults to `BadApple.mp4` (located via `find_resource_path`).
       *   Validates that the chosen video file exists.
   4.  **Temporary Folder Setup:** Gets the `temp` folder path from options and registers `cleanup_temp_folder` with `atexit` to ensure cleanup on exit.
-  5.  **144p Downscaling (using `subprocess`):**
-      *   This is a *second* place where downscaling can happen, specifically for the initial video file.
-      *   It loads the video with `VideoFileClip` just to get its dimensions.
+  5.  **Optimization: 144p Downscaling (using `subprocess`):**
+      *   Before any other processing, it checks the video's resolution.
       *   If the height is greater than 144, it constructs an `ffmpeg` command using `subprocess.run` to downscale the video to 144p (`scale=-2:144`) using `libx264` codec (`ultrafast` preset for speed) and copies the audio.
       *   The `vid` variable is then updated to point to this new, downscaled temporary video.
-      *   This ensures that even the *source* video for `get_stuff_from_video_stream` is already optimized.
-  6.  **Start Streaming Pipeline:** Calls `get_stuff_from_video_stream()` to begin background frame extraction and audio processing.
-  7.  **Start Playback:** Calls `play_ascii_video_stream_streaming()` to start the main video and audio playback.
-  8.  **Error Handling:** Uses `try-except` blocks to catch `KeyboardInterrupt` (Ctrl+C), `SystemExit`, and other general exceptions, ensuring `cleanup_temp_folder` is always called.
+      *   This ensures that the entire processing pipeline works with a smaller, more performant video file.
+  6.  **Start Streaming Pipeline:** Calls `get_stuff_from_video_stream()` to begin background frame extraction.
+  7.  **Start Playback:** Calls `play_ascii_video_stream_streaming()` to start the main video and audio playback, passing in the configurable seek durations from the options.
+  8.  **Error Handling:** Uses `try-except` blocks to catch `KeyboardInterrupt` (Ctrl+C) and other exceptions, ensuring `cleanup_temp_folder` is always called.
 - **Called by:** The `if __name__ == '__main__':` block.
 
 ### `if __name__ == '__main__':` block
 - **Purpose:** This standard Python construct ensures that the code inside it only runs when the script is executed directly (not when imported as a module). It sets up the overall application environment.
 - **How it works:**
   1.  **`multiprocessing.freeze_support()`:** Crucial for `multiprocessing` to work correctly when the script is bundled into an executable on Windows.
-  2.  **`managed_ffmpeg()` Context:** Wraps the entire `main()` call within the `managed_ffmpeg()` context manager, ensuring `ffmpeg` is available and cleaned up.
+  2.  **`managed_ffmpeg()` Context:** Wraps the main logic within the `managed_ffmpeg()` context manager, ensuring `ffmpeg` is available and cleaned up.
   3.  **Signal Handling:** Sets up `signal.SIGINT` (Ctrl+C) and `signal.SIGTERM` handlers to call `handle_exit`, which performs cleanup and exits gracefully.
-  4.  **Main Loop:** Calls `main()` to start the application.
-  5.  **Final Cleanup:** A `finally` block ensures `cleanup_temp_folder` is called one last time, even if unexpected errors occur.
+  4.  **Interactive Loop:** It checks if a command-line argument was provided.
+      - If yes, it calls `main()` once.
+      - If no, it enters a `while True:` loop, calling `main()` repeatedly. This allows the user to play another video after one finishes without restarting the script.
+  5.  **Final Cleanup:** A `finally` block ensures `cleanup_temp_folder` is called one last time.
+
+### `SuppressStderr` class
+- **Purpose:** A context manager to temporarily redirect the standard error stream (`sys.stderr`) to `os.devnull` (a black hole).
+- **How it's used here:** It's used to wrap the `import` statements for libraries like `pygame` and `moviepy`. This prevents them from printing their welcome messages or other noisy output to the terminal when the script starts, resulting in a cleaner user experience.
 
 ---
 
 ## Historical/Less Used Functions (Present in Code, but not in Primary Workflow)
 
 The provided `vidminal.py` contains some functions that represent older approaches or were part of previous iterations of the project. They are not part of the current, optimized playback pipeline but are explained here for completeness.
-
-### `SuppressStderr` class
-- **Purpose (Historical):** This class was designed to globally redirect `sys.stderr` to `os.devnull` (a black hole) to silence all standard error output from imported libraries like `moviepy` during their initialization.
-- **Why it's less used now:** While its intention was good, globally redirecting `sys.stderr` can cause issues, especially with `multiprocessing` on Windows, as `multiprocessing` relies on standard streams for its internal communication during process creation. More targeted `contextlib.redirect_stderr` (used around specific `moviepy` calls) is a safer approach.
 
 ### `get_stuff_from_video(vid, out, speed=24, wide=160)`
 - **Purpose (Historical):** This was an older method for processing video. It would extract *all* frames, convert *all* of them to ASCII, and save them as `.txt` files *before* playback began.
