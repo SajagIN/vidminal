@@ -32,6 +32,8 @@ Ever wanted to watch videos as colored ASCII art in your terminal, with sound, a
 - **Q**: Quit
 - **A/D**: Rewind/Forward 5 seconds
 - **←/→ (Arrow keys)**: Skip 1 second
+- **M**: Mute/Unmute
+- **+/-**: Volume Up/Down
 
 ---
 

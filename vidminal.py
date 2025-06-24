@@ -8,6 +8,7 @@ import contextlib  # context is king
 import io  # string jail
 import shutil  # delete stuff fast
 import atexit  # clean up my mess
+import subprocess  # command line wizard
 
 # stderr: go to sleep
 class SuppressStderr:
@@ -349,6 +350,10 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
     stop_flag = threading.Event()
     pause_flag = threading.Event()
     pause_flag.clear()
+    playback_state = {
+        'volume': 1.0,
+        'is_muted': False,
+    }
     rewind_forward = pyqueue.Queue()
 
     def keyboard_listener():
@@ -366,6 +371,15 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
                     pause_flag.set()
             elif key in ('q', 'Q'):
                 stop_flag.set()
+            elif key in ('m', 'M'):
+                playback_state['is_muted'] = not playback_state['is_muted']
+            elif key in ('-', '_'):
+                # Decrease volume, ensure it doesn't go below 0
+                playback_state['volume'] = max(0.0, round(playback_state['volume'] - 0.1, 1))
+            elif key in ('+', '='):
+                # Increase volume, ensure it doesn't go above 1.0, and unmute
+                playback_state['volume'] = min(1.0, round(playback_state['volume'] + 0.1, 1))
+                playback_state['is_muted'] = False
             elif key in ('a', 'A'):
                 rewind_forward.put(-5 * speed)  # rewind 5s
             elif key in ('d', 'D'):
@@ -395,6 +409,7 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
 
     def play_audio_from(pos):
         pygame.mixer.music.load(audio)
+        pygame.mixer.music.set_volume(0.0 if playback_state['is_muted'] else playback_state['volume'])
         pygame.mixer.music.play(start=pos)
 
     def format_time(t):
@@ -469,6 +484,11 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
         sleep_for = tgt - now
         if sleep_for > 0:
             time.sleep(sleep_for)
+        
+        # Apply volume changes from keyboard continuously
+        current_vol = 0.0 if playback_state['is_muted'] else playback_state['volume']
+        if pygame.mixer.music.get_volume() != current_vol:
+            pygame.mixer.music.set_volume(current_vol)
         # Check terminal size
         try:
             term_size = shutil.get_terminal_size()
@@ -487,13 +507,23 @@ def play_ascii_video_stream_streaming(folder, audio, frame_queue, total_frames, 
             print('Buffering...'.center(actual_frame_wide), end='\n') # Use actual_frame_wide for centering
         # --- Seek bar with play/pause and time ---
         play_emoji = '⏸️' if not pause_flag.is_set() else '▶️'
+        
+        # Volume UI
+        vol_bar_width = 10
+        vol_icon = '🔇' if playback_state['is_muted'] or playback_state['volume'] == 0 else '🔊'
+        if playback_state['is_muted']:
+            vol_bar = '-' * vol_bar_width
+        else:
+            vol_level = int(playback_state['volume'] * vol_bar_width)
+            vol_bar = '█' * vol_level + '-' * (vol_bar_width - vol_level)
+        vol_str = f" {vol_icon}[{vol_bar}]"
+
         time_str = f"{format_time(i / speed)} / {format_time(total_time)}"
-        # Assume emoji is 2 cells wide. Total fixed width is emoji(2) + " [] "(4) + time_str
-        fixed_len = 2 + 4 + len(time_str)
+        fixed_len = 2 + 4 + len(time_str) + len(vol_str)
         bar_width = max(1, actual_frame_wide - fixed_len) # Use actual_frame_wide here
         bar_pos = int((i / (total_frames - 1)) * bar_width) if total_frames > 1 else 0
         bar = '█' * bar_pos + '-' * (bar_width - bar_pos)
-        print(f"{play_emoji} [{bar}] {time_str}")
+        print(f"{play_emoji} [{bar}] {time_str}{vol_str}")
         # --- End seek bar ---
         i += 1
         if frames_buffer:
@@ -533,7 +563,9 @@ def main():
         f"{box_color}╔{'═'* (box_width-2)}╗{reset}",
         box_line("  Turns videos into ugly terminal art. With sound.  "),
         box_line("  Made by a lazy coder. " + Fore.MAGENTA + "@github/SajagIN" + text_color + "  "),
-        box_line(f"  {Fore.GREEN}Space{reset}{text_color} = pause  {Fore.GREEN}Q{reset}{text_color} = quit  {Fore.GREEN}A/D{reset}{text_color} = rewind/forward 5s  "),
+        box_line(f"  {Fore.GREEN}Space{reset}{text_color} = pause/play   {Fore.GREEN}Q{reset}{text_color} = quit"),
+        box_line(f"  {Fore.GREEN}A/D{reset}{text_color} = seek 5s      {Fore.GREEN}←/→{reset}{text_color} = seek 1s"),
+        box_line(f"  {Fore.GREEN}M{reset}{text_color} = mute           {Fore.GREEN}+/-{reset}{text_color} = volume"),
         f"{box_color}╚{'═'* (box_width-2)}╝{reset}",
         ""
     ]
@@ -566,6 +598,35 @@ def main():
     atexit.unregister_all = getattr(atexit, 'unregister_all', lambda: None)  # For repeated runs in interactive mode
     atexit.unregister_all()
     atexit.register(lambda: cleanup_temp_folder(temp))
+
+    # --- Downscale to 144p if needed ---
+    # Ensure temp exists
+    if not os.path.exists(temp):
+        os.makedirs(temp)
+    # Check video resolution
+    try:
+        clip = VideoFileClip(vid)
+        w, h = clip.size
+        clip.close()
+        if h > 144:
+            # Downscale to 144p and use as new source
+            downscaled_path = os.path.join(temp, 'downscaled_144p.mp4')
+            # Use ffmpeg from env or system
+            ffmpeg_bin = os.environ.get('FFMPEG_BINARY', 'ffmpeg')
+            # -y to overwrite, -vf scale=-2:144 to keep aspect
+            cmd = [ffmpeg_bin, '-y', '-i', vid, '-vf', 'scale=-2:144', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'copy', downscaled_path]
+            try:
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                vid = downscaled_path
+            except Exception as e:
+                print(Fore.RED + f"Downscaling failed: {e}" + reset)
+                sys.exit(1)
+        # else: use original vid
+    except Exception as e:
+        print(Fore.RED + f"Failed to check video resolution: {e}" + reset)
+        sys.exit(1)
+    # --- End downscale logic ---
+
     try:
         frames, audio, frame_queue, total_frames, video_duration = get_stuff_from_video_stream(vid, temp, speed=fps, buffer_size=fps)
         print(Fore.GREEN + Style.BRIGHT + 'Streaming ASCII video...' + reset)
